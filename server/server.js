@@ -739,4 +739,286 @@ app.post("/purchase-requests", async (req, res) => {
 // Obtener solicitudes de compra del usuario autenticado (como comprador)
 app.get("/me/purchase-requests", authenticateToken, (req, res) => {
   const sql = `
-    SELECT pr.*, aw.title as artwork_title, aw.price_cents as artwork
+    SELECT pr.*, aw.title as artwork_title, aw.price_cents as artwork_price,
+           a.stage_name, u.full_name as artist_name
+    FROM purchase_requests pr
+    JOIN artworks aw ON pr.artwork_id = aw.id
+    JOIN artists a ON aw.artist_id = a.id
+    JOIN users u ON a.id = u.id
+    WHERE pr.buyer_user_id = ?
+    ORDER BY pr.created_at DESC
+  `;
+  
+  db.query(sql, [req.user.id], (err, result) => {
+    if (err) return res.status(500).json({ message: "Error del servidor" });
+    return res.json(result);
+  });
+});
+
+// Obtener solicitudes de compra recibidas (artista)
+app.get("/me/requests-received", authenticateToken, (req, res) => {
+  const sql = `
+    SELECT pr.*, aw.title as artwork_title, aw.price_cents as artwork_price
+    FROM purchase_requests pr
+    JOIN artworks aw ON pr.artwork_id = aw.id
+    WHERE aw.artist_id = ?
+    ORDER BY pr.created_at DESC
+  `;
+  
+  db.query(sql, [req.user.id], (err, result) => {
+    if (err) return res.status(500).json({ message: "Error del servidor" });
+    return res.json(result);
+  });
+});
+
+// Obtener todas las solicitudes (admin)
+app.get("/purchase-requests", (req, res) => {
+  const sql = `
+    SELECT pr.*, aw.title as artwork_title, aw.price_cents as artwork_price,
+           a.stage_name, u.full_name as artist_name
+    FROM purchase_requests pr
+    JOIN artworks aw ON pr.artwork_id = aw.id
+    JOIN artists a ON aw.artist_id = a.id
+    JOIN users u ON a.id = u.id
+    ORDER BY pr.created_at DESC
+  `;
+  
+  db.query(sql, (err, result) => {
+    if (err) return res.status(500).json({ message: "Error del servidor" });
+    return res.json(result);
+  });
+});
+
+// Obtener solicitud por ID
+app.get("/purchase-requests/:id", (req, res) => {
+  const id = req.params.id;
+  const sql = `
+    SELECT pr.*, aw.title as artwork_title, aw.price_cents as artwork_price,
+           a.stage_name, u.full_name as artist_name
+    FROM purchase_requests pr
+    JOIN artworks aw ON pr.artwork_id = aw.id
+    JOIN artists a ON aw.artist_id = a.id
+    JOIN users u ON a.id = u.id
+    WHERE pr.id = ?
+  `;
+  
+  db.query(sql, [id], (err, result) => {
+    if (err) return res.status(500).json({ message: "Error del servidor" });
+    if (result.length === 0) {
+      return res.status(404).json({ message: "Solicitud no encontrada" });
+    }
+    return res.json(result[0]);
+  });
+});
+
+// Actualizar estado de solicitud (artista o admin)
+app.put("/purchase-requests/:id", authenticateToken, (req, res) => {
+  const id = req.params.id;
+  const { status } = req.body;
+
+  // Verificar que el usuario sea el artista dueño de la obra o admin
+  const checkSql = `
+    SELECT aw.artist_id 
+    FROM purchase_requests pr
+    JOIN artworks aw ON pr.artwork_id = aw.id
+    WHERE pr.id = ?
+  `;
+  
+  db.query(checkSql, [id], (err, results) => {
+    if (err) return res.status(500).json({ message: "Error del servidor" });
+    if (results.length === 0) {
+      return res.status(404).json({ message: "Solicitud no encontrada" });
+    }
+    
+    if (results[0].artist_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ message: "No tienes permiso para actualizar esta solicitud" });
+    }
+
+    const sql = "UPDATE purchase_requests SET status = ? WHERE id = ?";
+    db.query(sql, [status, id], (err, result) => {
+      if (err) {
+        return res.status(500).json({ message: "Error al actualizar: " + err.message });
+      }
+      return res.json({ success: "Solicitud actualizada exitosamente" });
+    });
+  });
+});
+
+// ============================================
+// ENDPOINTS PARA IMÁGENES
+// ============================================
+
+// Agregar imagen a una obra
+app.post("/images", authenticateToken, async (req, res) => {
+  try {
+    const {
+      artwork_id, role, storage_provider, bucket, object_key,
+      url, mime, width, height, size_bytes, checksum_sha256, sort_order
+    } = req.body;
+
+    if (!artwork_id || !storage_provider || !bucket || !object_key || !mime) {
+      return res.status(400).json({ message: "Faltan campos requeridos" });
+    }
+
+    // Verificar que la obra pertenezca al artista
+    const checkSql = "SELECT artist_id FROM artworks WHERE id = ?";
+    db.query(checkSql, [artwork_id], (err, results) => {
+      if (err) return res.status(500).json({ message: "Error del servidor" });
+      if (results.length === 0) {
+        return res.status(404).json({ message: "Obra no encontrada" });
+      }
+      
+      if (results[0].artist_id !== req.user.id && req.user.role !== 'admin') {
+        return res.status(403).json({ message: "No tienes permiso para agregar imágenes a esta obra" });
+      }
+
+      const sql = `INSERT INTO images (artwork_id, role, storage_provider, bucket, object_key, 
+                   url, mime, width, height, size_bytes, checksum_sha256, sort_order) 
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+      const values = [
+        artwork_id, role || 'detail', storage_provider, bucket, object_key,
+        url, mime, width, height, size_bytes, checksum_sha256, sort_order || 0
+      ];
+
+      db.query(sql, values, (err, result) => {
+        if (err) {
+          return res.status(500).json({ message: "Error al crear imagen: " + err.message });
+        }
+        return res.status(201).json({ 
+          success: "Imagen agregada exitosamente", 
+          id: result.insertId 
+        });
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({ message: "Error interno: " + error.message });
+  }
+});
+
+// Obtener imágenes de una obra
+app.get("/artworks/:id/images", (req, res) => {
+  const artwork_id = req.params.id;
+  const sql = "SELECT * FROM images WHERE artwork_id = ? ORDER BY sort_order, created_at";
+  
+  db.query(sql, [artwork_id], (err, result) => {
+    if (err) return res.status(500).json({ message: "Error del servidor" });
+    return res.json(result);
+  });
+});
+
+// Actualizar imagen
+app.put("/images/:id", authenticateToken, (req, res) => {
+  const id = req.params.id;
+  const { role, url, sort_order } = req.body;
+
+  // Verificar permisos
+  const checkSql = `
+    SELECT aw.artist_id 
+    FROM images img
+    JOIN artworks aw ON img.artwork_id = aw.id
+    WHERE img.id = ?
+  `;
+  
+  db.query(checkSql, [id], (err, results) => {
+    if (err) return res.status(500).json({ message: "Error del servidor" });
+    if (results.length === 0) {
+      return res.status(404).json({ message: "Imagen no encontrada" });
+    }
+    
+    if (results[0].artist_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ message: "No tienes permiso para actualizar esta imagen" });
+    }
+
+    const sql = "UPDATE images SET role = ?, url = ?, sort_order = ? WHERE id = ?";
+    db.query(sql, [role, url, sort_order, id], (err, result) => {
+      if (err) {
+        return res.status(500).json({ message: "Error al actualizar: " + err.message });
+      }
+      return res.json({ success: "Imagen actualizada exitosamente" });
+    });
+  });
+});
+
+// Eliminar imagen
+app.delete("/images/:id", authenticateToken, (req, res) => {
+  const id = req.params.id;
+  
+  // Verificar permisos
+  const checkSql = `
+    SELECT aw.artist_id 
+    FROM images img
+    JOIN artworks aw ON img.artwork_id = aw.id
+    WHERE img.id = ?
+  `;
+  
+  db.query(checkSql, [id], (err, results) => {
+    if (err) return res.status(500).json({ message: "Error del servidor" });
+    if (results.length === 0) {
+      return res.status(404).json({ message: "Imagen no encontrada" });
+    }
+    
+    if (results[0].artist_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ message: "No tienes permiso para eliminar esta imagen" });
+    }
+
+    const sql = "DELETE FROM images WHERE id = ?";
+    db.query(sql, [id], (err, result) => {
+      if (err) {
+        return res.status(500).json({ message: "Error al eliminar: " + err.message });
+      }
+      return res.json({ success: "Imagen eliminada exitosamente" });
+    });
+  });
+});
+
+// Establecer imagen principal de una obra
+app.put("/artworks/:id/primary-image", authenticateToken, (req, res) => {
+  const artwork_id = req.params.id;
+  const { image_id } = req.body;
+
+  // Verificar permisos
+  const checkSql = "SELECT artist_id FROM artworks WHERE id = ?";
+  db.query(checkSql, [artwork_id], (err, results) => {
+    if (err) return res.status(500).json({ message: "Error del servidor" });
+    if (results.length === 0) {
+      return res.status(404).json({ message: "Obra no encontrada" });
+    }
+    
+    if (results[0].artist_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ message: "No tienes permiso para modificar esta obra" });
+    }
+
+    const sql = "UPDATE artworks SET primary_image_id = ? WHERE id = ?";
+    db.query(sql, [image_id, artwork_id], (err, result) => {
+      if (err) {
+        return res.status(500).json({ message: "Error al actualizar: " + err.message });
+      }
+      return res.json({ success: "Imagen principal actualizada" });
+    });
+  });
+});
+
+// ============================================
+// ENDPOINT DE SALUD
+// ============================================
+
+app.get("/health", (req, res) => {
+  res.json({ 
+    status: "OK", 
+    message: "Art Gallery API is running",
+    timestamp: new Date().toISOString()
+  });
+});
+
+// ============================================
+// SERVIDOR
+// ============================================
+
+app.listen(port, () => {
+  console.log(`\n========================================`);
+  console.log(`🎨 Art Gallery API listening on port ${port}`);
+  console.log(`========================================`);
+  console.log(`📡 Health check: http://localhost:${port}/health`);
+  console.log(`🔐 JWT Secret: ${JWT_SECRET.substring(0, 10)}...`);
+  console.log(`========================================\n`);
+});
