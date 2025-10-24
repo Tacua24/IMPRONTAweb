@@ -1,22 +1,8 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 
 function Home() {
   const [artworks, setArtworks] = useState([]);
-  const [filteredArtworks, setFilteredArtworks] = useState([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
-  const closeBtnRef = useRef(null);
-
-  useEffect(() => {
-    const onKey = (e) => e.key === "Escape" && setOpen(false);
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  useEffect(() => {
-    if (open) setTimeout(() => closeBtnRef.current?.focus(), 0);
-  }, [open]);
 
   useEffect(() => {
     fetch('http://localhost:5000/artworks')
@@ -24,7 +10,6 @@ function Home() {
       .then((data) => {
         const publishedWorks = data.filter(work => work.status === 'published');
         setArtworks(publishedWorks);
-        setFilteredArtworks(publishedWorks);
         setLoading(false);
       })
       .catch((err) => {
@@ -32,16 +17,6 @@ function Home() {
         setLoading(false);
       });
   }, []);
-
-  useEffect(() => {
-    const filtered = artworks.filter(artwork =>
-      artwork.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      artwork.artist_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (artwork.stage_name && artwork.stage_name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (artwork.category_name && artwork.category_name.toLowerCase().includes(searchQuery.toLowerCase()))
-    );
-    setFilteredArtworks(filtered);
-  }, [searchQuery, artworks]);
 
   const formatPrice = (cents, currency) => {
     if (!cents) return '';
@@ -53,27 +28,7 @@ function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f4f4f2] text-[#111] overflow-x-hidden">
-      {/* BARRA SUPERIOR */}
-      <div className="w-full text-[10px] uppercase tracking-wide text-neutral-600 flex items-center justify-between px-6 py-2 border-b border-black/10">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            className="px-2 py-1 rounded hover:bg-black/5"
-          >
-            Menú
-          </button>
-          <span>|</span>
-          <span>/01 Intro</span>
-        </div>
-        <div>Galería Impronta</div>
-        <div className="flex gap-2 items-center">
-          <span>Estado</span>
-          <span className="inline-block w-2 h-2 rounded-full bg-emerald-600" />
-        </div>
-      </div>
-
+    <div className="min-h-screen bg-[#f4f4f2] text-[#111]">
       {/* TÍTULO GRANDE */}
       <header className="px-6 sm:px-10 pt-8 sm:pt-12 border-b border-black/10">
         <h1
@@ -94,7 +49,7 @@ function Home() {
       <main className="px-6 sm:px-10">
         {/* SECCIÓN INTRODUCCIÓN */}
         <section className="py-16 border-b border-black/10">
-          <div className="max-w-4xl">
+          <div className="max-w-4xl mx-auto text-center">
             <h2 className="text-[10px] uppercase tracking-[0.25em] text-neutral-600 mb-6">
               /02 Introducción
             </h2>
@@ -110,32 +65,23 @@ function Home() {
         {/* SECCIÓN OBRAS */}
         <section className="py-16">
           <div className="mb-8">
-            <h2 className="text-[10px] uppercase tracking-[0.25em] text-neutral-600 mb-6">
+            <h2 className="text-[10px] uppercase tracking-[0.25em] text-neutral-600 mb-6 text-center">
               /03 Obras disponibles
             </h2>
-            <div className="max-w-md">
-              <input
-                type="text"
-                placeholder="Buscar por título, artista o categoría..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full border border-black/20 px-4 py-2 text-sm outline-none focus:border-black/40 transition placeholder:text-neutral-400 bg-white"
-              />
-            </div>
           </div>
 
           {/* GALERÍA CUADRICULADA */}
           {loading ? (
-            <div className="py-20">
+            <div className="py-20 text-center">
               <p className="text-neutral-500 text-sm">Cargando obras...</p>
             </div>
-          ) : filteredArtworks.length === 0 ? (
-            <div className="py-20">
+          ) : artworks.length === 0 ? (
+            <div className="py-20 text-center">
               <p className="text-neutral-500 text-sm">No se encontraron obras</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-px bg-black/10">
-              {filteredArtworks.map((artwork) => (
+              {artworks.map((artwork) => (
                 <div
                   key={artwork.id}
                   className="bg-white p-6 hover:bg-neutral-50 transition-colors cursor-pointer"
@@ -179,71 +125,6 @@ function Home() {
           <div className="text-right">Contacto</div>
         </div>
       </footer>
-
-      {/* OVERLAY + MENÚ LATERAL */}
-      <div className={`fixed inset-0 z-50 transition-all duration-300 ${open ? "pointer-events-auto" : "pointer-events-none"}`}>
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          className={`absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity duration-300 ${open ? "opacity-100" : "opacity-0"}`}
-          aria-label="Cerrar menú"
-        />
-        <aside
-          role="dialog"
-          aria-label="Menú de navegación"
-          className={`absolute left-0 top-0 h-full w-72 max-w-[85%] bg-white text-[#111] shadow-[0_10px_40px_rgba(0,0,0,0.25)] p-6 transform transition-transform duration-300 ${
-            open ? "translate-x-0" : "-translate-x-full"
-          }`}
-        >
-          <div className="flex items-center justify-between mb-8 pb-4 border-b border-black/10">
-            <span className="text-[10px] uppercase tracking-widest text-neutral-600">Menú principal</span>
-            <button
-              ref={closeBtnRef}
-              type="button"
-              onClick={() => setOpen(false)}
-              className="text-lg px-2 py-1 rounded hover:bg-black/5"
-              aria-label="Cerrar menú"
-            >
-              ✕
-            </button>
-          </div>
-
-          <nav className="space-y-1 text-sm">
-            <a
-              href="/"
-              className="block w-full px-4 py-3 rounded hover:bg-black/5 transition-colors"
-            >
-              Home
-            </a>
-            <a
-              href="/favorites"
-              className="block w-full px-4 py-3 rounded hover:bg-black/5 transition-colors"
-            >
-              Favoritos
-            </a>
-            <a
-              href="/requests"
-              className="block w-full px-4 py-3 rounded hover:bg-black/5 transition-colors"
-            >
-              Solicitudes
-            </a>
-            <a
-              href="/profile"
-              className="block w-full px-4 py-3 rounded hover:bg-black/5 transition-colors"
-            >
-              Perfil
-            </a>
-            
-            <div className="border-t border-black/10 my-4"></div>
-            
-            <button
-              className="block w-full px-4 py-3 rounded hover:bg-red-50 transition-colors text-left text-red-600"
-            >
-              Cerrar sesión
-            </button>
-          </nav>
-        </aside>
-      </div>
     </div>
   );
 }

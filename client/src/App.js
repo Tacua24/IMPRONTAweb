@@ -2,14 +2,35 @@ import React, { useState, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, NavLink } from 'react-router-dom';
 import Home from './components/Home';
 import Profile from './components/Profile';
+import CreateArtwork from './components/CreateArtwork';
 
 function App() {
   const [open, setOpen] = useState(false);
   const closeBtnRef = useRef(null);
+  const [userRole, setUserRole] = useState(null);
 
   // Cambiar título de la pestaña
   useEffect(() => {
     document.title = 'IMPRONTA';
+  }, []);
+
+  // Verificar rol del usuario
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      fetch('http://localhost:5000/verify-token', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.user) {
+            setUserRole(data.user.role);
+          }
+        })
+        .catch(() => {
+          setUserRole(null);
+        });
+    }
   }, []);
 
   useEffect(() => {
