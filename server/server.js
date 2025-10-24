@@ -15,9 +15,10 @@ const JWT_SECRET = "tu_clave_secreta_super_segura_cambiala"; // CAMBIAR EN PRODU
 
 // Configuración de la base de datos
 const db = mysql.createConnection({
-  host: "localhost",
+  host: "127.0.0.1",
+  port: 3306,
   user: "root",
-  password: "",
+  password: "242002",
   database: "art_gallery",
 });
 
