@@ -8,9 +8,40 @@ function Home() {
     fetch('http://localhost:5000/artworks')
       .then((res) => res.json())
       .then((data) => {
+        console.log('Artworks recibidos:', data);
         const publishedWorks = data.filter(work => work.status === 'published');
-        setArtworks(publishedWorks);
-        setLoading(false);
+        console.log('Obras publicadas:', publishedWorks);
+        
+        // Para cada obra, obtener su imagen principal
+        const worksWithImages = publishedWorks.map(async (work) => {
+          console.log(`Procesando obra ${work.id}, primary_image_id:`, work.primary_image_id);
+          
+          if (work.primary_image_id) {
+            try {
+              const imgResponse = await fetch(`http://localhost:5000/artworks/${work.id}/images`);
+              const images = await imgResponse.json();
+              console.log(`Imágenes de obra ${work.id}:`, images);
+              
+              const primaryImage = images.find(img => img.id === work.primary_image_id);
+              console.log(`Imagen principal de obra ${work.id}:`, primaryImage);
+              
+              return {
+                ...work,
+                image_url: primaryImage?.url || null
+              };
+            } catch (err) {
+              console.error('Error fetching images:', err);
+              return { ...work, image_url: null };
+            }
+          }
+          return { ...work, image_url: null };
+        });
+
+        Promise.all(worksWithImages).then(works => {
+          console.log('Obras finales con imágenes:', works);
+          setArtworks(works);
+          setLoading(false);
+        });
       })
       .catch((err) => {
         console.log(err);
@@ -86,10 +117,18 @@ function Home() {
                   key={artwork.id}
                   className="bg-white p-6 hover:bg-neutral-50 transition-colors cursor-pointer"
                 >
-                  <div className="aspect-square w-full bg-neutral-200 mb-4 flex items-center justify-center">
-                    <span className="text-xs text-neutral-400 uppercase tracking-wider">
-                      Sin imagen
-                    </span>
+                  <div className="aspect-square w-full bg-neutral-200 mb-4 flex items-center justify-center overflow-hidden">
+                    {artwork.image_url ? (
+                      <img 
+                        src={artwork.image_url} 
+                        alt={artwork.title}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <span className="text-xs text-neutral-400 uppercase tracking-wider">
+                        Sin imagen
+                      </span>
+                    )}
                   </div>
                   <div className="space-y-1">
                     <h3 className="text-sm font-medium text-neutral-900 tracking-tight">

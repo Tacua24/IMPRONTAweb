@@ -8,7 +8,8 @@ const app = express();
 
 app.use(express.static(path.join(__dirname, "public")));
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const port = 5000;
 const JWT_SECRET = "tu_clave_secreta_super_segura_cambiala"; // CAMBIAR EN PRODUCCIÓN
@@ -857,19 +858,40 @@ app.post("/images", authenticateToken, async (req, res) => {
       url, mime, width, height, size_bytes, checksum_sha256, sort_order
     } = req.body;
 
+    console.log('📸 POST /images - Datos recibidos:', {
+      artwork_id,
+      role,
+      storage_provider,
+      bucket,
+      object_key: object_key?.substring(0, 50) + '...',
+      url: url ? `${url.substring(0, 30)}...` : null,
+      mime,
+      size_bytes,
+      sort_order
+    });
+
     if (!artwork_id || !storage_provider || !bucket || !object_key || !mime) {
+      console.log('❌ Faltan campos requeridos');
       return res.status(400).json({ message: "Faltan campos requeridos" });
     }
 
     // Verificar que la obra pertenezca al artista
     const checkSql = "SELECT artist_id FROM artworks WHERE id = ?";
     db.query(checkSql, [artwork_id], (err, results) => {
-      if (err) return res.status(500).json({ message: "Error del servidor" });
+      if (err) {
+        console.log('❌ Error verificando artwork:', err);
+        return res.status(500).json({ message: "Error del servidor" });
+      }
       if (results.length === 0) {
+        console.log('❌ Obra no encontrada:', artwork_id);
         return res.status(404).json({ message: "Obra no encontrada" });
       }
       
+      console.log('✅ Artwork encontrado, artist_id:', results[0].artist_id);
+      console.log('✅ Usuario autenticado:', req.user.id);
+      
       if (results[0].artist_id !== req.user.id && req.user.role !== 'admin') {
+        console.log('❌ Sin permisos');
         return res.status(403).json({ message: "No tienes permiso para agregar imágenes a esta obra" });
       }
 
@@ -881,10 +903,16 @@ app.post("/images", authenticateToken, async (req, res) => {
         url, mime, width, height, size_bytes, checksum_sha256, sort_order || 0
       ];
 
+      console.log('📝 Ejecutando INSERT...');
+
       db.query(sql, values, (err, result) => {
         if (err) {
+          console.log('❌ Error en INSERT:', err);
           return res.status(500).json({ message: "Error al crear imagen: " + err.message });
         }
+        
+        console.log('✅ Imagen insertada! ID:', result.insertId);
+        
         return res.status(201).json({ 
           success: "Imagen agregada exitosamente", 
           id: result.insertId 
@@ -892,6 +920,7 @@ app.post("/images", authenticateToken, async (req, res) => {
       });
     });
   } catch (error) {
+    console.log('❌ Error general:', error);
     return res.status(500).json({ message: "Error interno: " + error.message });
   }
 });
@@ -977,23 +1006,41 @@ app.put("/artworks/:id/primary-image", authenticateToken, (req, res) => {
   const artwork_id = req.params.id;
   const { image_id } = req.body;
 
+  console.log('🖼️ PUT /artworks/:id/primary-image:', {
+    artwork_id,
+    image_id,
+    user_id: req.user.id
+  });
+
   // Verificar permisos
   const checkSql = "SELECT artist_id FROM artworks WHERE id = ?";
   db.query(checkSql, [artwork_id], (err, results) => {
-    if (err) return res.status(500).json({ message: "Error del servidor" });
+    if (err) {
+      console.log('❌ Error verificando artwork:', err);
+      return res.status(500).json({ message: "Error del servidor" });
+    }
     if (results.length === 0) {
+      console.log('❌ Obra no encontrada:', artwork_id);
       return res.status(404).json({ message: "Obra no encontrada" });
     }
     
+    console.log('✅ Artwork encontrado, artist_id:', results[0].artist_id);
+    
     if (results[0].artist_id !== req.user.id && req.user.role !== 'admin') {
+      console.log('❌ Sin permisos');
       return res.status(403).json({ message: "No tienes permiso para modificar esta obra" });
     }
 
     const sql = "UPDATE artworks SET primary_image_id = ? WHERE id = ?";
+    console.log('📝 Ejecutando UPDATE primary_image_id...');
+    
     db.query(sql, [image_id, artwork_id], (err, result) => {
       if (err) {
+        console.log('❌ Error en UPDATE:', err);
         return res.status(500).json({ message: "Error al actualizar: " + err.message });
       }
+      
+      console.log('✅ Primary image actualizada!', result);
       return res.json({ success: "Imagen principal actualizada" });
     });
   });

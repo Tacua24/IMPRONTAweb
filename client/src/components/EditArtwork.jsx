@@ -1,20 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 
-function CreateArtwork() {
+function EditArtwork() {
+  const { id } = useParams();
   const [loading, setLoading] = useState(false);
+  const [loadingData, setLoadingData] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [userData, setUserData] = useState(null);
-  const [images, setImages] = useState([]);
-  const [previewImages, setPreviewImages] = useState([]);
   
   const navigate = useNavigate();
 
   const [artworkData, setArtworkData] = useState({
     title: '',
     description: '',
-    year: new Date().getFullYear(),
+    year: '',
     category_name: '',
     medium_name: '',
     width_cm: '',
@@ -30,7 +29,7 @@ function CreateArtwork() {
     status: 'draft'
   });
 
-  // Verificar que el usuario sea artista
+  // Cargar datos de la obra
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) {
@@ -38,139 +37,55 @@ function CreateArtwork() {
       return;
     }
 
+    // Verificar permisos y cargar obra
     fetch('http://localhost:5000/verify-token', {
       headers: { 'Authorization': `Bearer ${token}` }
     })
       .then(res => res.json())
       .then(data => {
         if (data.user.role !== 'artist') {
-          setError('Solo los artistas pueden crear obras');
+          setError('Solo los artistas pueden editar obras');
           setTimeout(() => navigate('/'), 2000);
-        } else {
-          setUserData(data.user);
+          return;
         }
+        
+        // Cargar la obra
+        return fetch(`http://localhost:5000/artworks/${id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
       })
-      .catch(() => {
-        navigate('/profile');
+      .then(res => res.json())
+      .then(artwork => {
+        // Convertir precio de centavos a formato decimal
+        const priceInDecimal = artwork.price_cents ? (artwork.price_cents / 100).toFixed(2) : '';
+        
+        setArtworkData({
+          title: artwork.title || '',
+          description: artwork.description || '',
+          year: artwork.year || '',
+          category_name: artwork.category_name || '',
+          medium_name: artwork.medium_name || '',
+          width_cm: artwork.width_cm || '',
+          height_cm: artwork.height_cm || '',
+          depth_cm: artwork.depth_cm || '',
+          framed: artwork.framed === 1,
+          edition_name: artwork.edition_name || '',
+          edition_size: artwork.edition_size || '',
+          edition_number: artwork.edition_number || '',
+          is_for_sale: artwork.is_for_sale === 1,
+          price_cents: priceInDecimal,
+          currency: artwork.currency || 'USD',
+          status: artwork.status || 'draft'
+        });
+        setLoadingData(false);
+      })
+      .catch(err => {
+        setError('Error al cargar la obra');
+        setLoadingData(false);
       });
-  }, [navigate]);
+  }, [id, navigate]);
 
-  // Manejar selección de imágenes
-  const handleImageChange = (e) => {
-    const files = Array.from(e.target.files);
-    
-    if (files.length + images.length > 10) {
-      setError('Máximo 10 imágenes por obra');
-      return;
-    }
-
-    setImages(prev => [...prev, ...files]);
-
-    // Crear previews
-    files.forEach(file => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setPreviewImages(prev => [...prev, {
-          url: reader.result,
-          name: file.name
-        }]);
-      };
-      reader.readAsDataURL(file);
-    });
-  };
-
-  // Eliminar imagen
-  const handleRemoveImage = (index) => {
-    setImages(prev => prev.filter((_, i) => i !== index));
-    setPreviewImages(prev => prev.filter((_, i) => i !== index));
-  };
-
-  // Subir imágenes al servidor
-  const uploadImages = async (artworkId, token) => {
-    const uploadedImages = [];
-    let primaryImageId = null;
-
-    console.log('Iniciando subida de imágenes para artwork:', artworkId);
-
-    for (let i = 0; i < images.length; i++) {
-      try {
-        const imageData = {
-          artwork_id: parseInt(artworkId), // Asegurar que sea número
-          role: i === 0 ? 'cover' : 'detail',
-          storage_provider: 'local',
-          bucket: 'artworks',
-          object_key: `artworks/${artworkId}/${Date.now()}-${i}-${images[i].name}`,
-          url: previewImages[i].url,
-          mime: images[i].type,
-          width: null,
-          height: null,
-          size_bytes: images[i].size,
-          checksum_sha256: null,
-          sort_order: i
-        };
-
-        console.log(`Subiendo imagen ${i + 1}/${images.length}:`, imageData.object_key);
-
-        const response = await fetch('http://localhost:5000/images', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(imageData)
-        });
-
-        const result = await response.json();
-        console.log(`Respuesta imagen ${i + 1}:`, result);
-
-        if (response.ok && result.id) {
-          uploadedImages.push(result);
-          
-          // La primera imagen será la imagen principal
-          if (i === 0) {
-            primaryImageId = result.id;
-            console.log('Imagen principal ID:', primaryImageId);
-          }
-        } else {
-          console.error(`Error subiendo imagen ${i + 1}:`, result);
-          setError(`Error al subir imagen ${i + 1}: ${result.message || 'Error desconocido'}`);
-        }
-      } catch (err) {
-        console.error(`Error en imagen ${i + 1}:`, err);
-        setError(`Error al subir imagen ${i + 1}`);
-      }
-    }
-
-    // Actualizar la obra con la imagen principal
-    if (primaryImageId) {
-      console.log('Estableciendo imagen principal:', primaryImageId);
-      try {
-        const response = await fetch(`http://localhost:5000/artworks/${artworkId}/primary-image`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({ image_id: primaryImageId })
-        });
-
-        const result = await response.json();
-        console.log('Respuesta imagen principal:', result);
-
-        if (!response.ok) {
-          console.error('Error al establecer imagen principal:', result);
-        }
-      } catch (err) {
-        console.error('Error al establecer imagen principal:', err);
-      }
-    } else {
-      console.warn('No se pudo obtener ID de imagen principal');
-    }
-
-    return uploadedImages;
-  };
-
-  // Crear obra
+  // Actualizar obra
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -198,8 +113,8 @@ function CreateArtwork() {
         is_for_sale: artworkData.is_for_sale ? 1 : 0
       };
 
-      const response = await fetch('http://localhost:5000/artworks', {
-        method: 'POST',
+      const response = await fetch(`http://localhost:5000/artworks/${id}`, {
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
@@ -210,30 +125,25 @@ function CreateArtwork() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || 'Error al crear la obra');
+        throw new Error(data.message || 'Error al actualizar la obra');
       }
 
-      // Subir imágenes si hay
-      if (images.length > 0) {
-        await uploadImages(data.id, token);
-      }
-
-      setSuccess('Obra creada exitosamente!');
+      setSuccess('Obra actualizada exitosamente!');
       setTimeout(() => {
-        navigate('/');
-      }, 2000);
+        navigate('/my-artworks');
+      }, 1500);
 
     } catch (err) {
-      setError(err.message || 'Error al crear la obra');
+      setError(err.message || 'Error al actualizar la obra');
     } finally {
       setLoading(false);
     }
   };
 
-  if (!userData) {
+  if (loadingData) {
     return (
       <div className="min-h-screen bg-[#f4f4f2] flex items-center justify-center">
-        <p className="text-sm text-neutral-600">Verificando permisos...</p>
+        <p className="text-sm text-neutral-600">Cargando obra...</p>
       </div>
     );
   }
@@ -243,10 +153,10 @@ function CreateArtwork() {
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-8 border-b border-black/10 pb-4">
           <h2 className="text-[10px] uppercase tracking-[0.25em] text-neutral-600">
-            /Crear nueva obra
+            /Editar obra
           </h2>
           <button
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/my-artworks')}
             className="text-sm text-neutral-600 hover:text-black uppercase tracking-wider transition-colors"
           >
             ← Volver
@@ -298,7 +208,6 @@ function CreateArtwork() {
                   value={artworkData.description}
                   onChange={(e) => setArtworkData({ ...artworkData, description: e.target.value })}
                   className="w-full border border-black/20 px-4 py-2 text-sm outline-none focus:border-black/40 transition resize-none"
-                  placeholder="Describe tu obra, técnica, inspiración..."
                 />
               </div>
 
@@ -329,7 +238,6 @@ function CreateArtwork() {
                     value={artworkData.category_name}
                     onChange={(e) => setArtworkData({ ...artworkData, category_name: e.target.value })}
                     className="w-full border border-black/20 px-4 py-2 text-sm outline-none focus:border-black/40 transition"
-                    placeholder="Pintura, Escultura..."
                   />
                 </div>
 
@@ -344,7 +252,6 @@ function CreateArtwork() {
                     value={artworkData.medium_name}
                     onChange={(e) => setArtworkData({ ...artworkData, medium_name: e.target.value })}
                     className="w-full border border-black/20 px-4 py-2 text-sm outline-none focus:border-black/40 transition"
-                    placeholder="Óleo, Acrílico..."
                   />
                 </div>
               </div>
@@ -417,60 +324,6 @@ function CreateArtwork() {
             </div>
           </section>
 
-          {/* Edición */}
-          <section>
-            <h3 className="text-xs uppercase tracking-wider text-neutral-600 mb-4 pb-2 border-b border-black/10">
-              Edición (opcional)
-            </h3>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-              <div>
-                <label htmlFor="edition_name" className="block text-xs uppercase tracking-wider text-neutral-600 mb-2">
-                  Nombre de edición
-                </label>
-                <input
-                  type="text"
-                  id="edition_name"
-                  maxLength="100"
-                  value={artworkData.edition_name}
-                  onChange={(e) => setArtworkData({ ...artworkData, edition_name: e.target.value })}
-                  className="w-full border border-black/20 px-4 py-2 text-sm outline-none focus:border-black/40 transition"
-                  placeholder="Ej: Edición limitada"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="edition_size" className="block text-xs uppercase tracking-wider text-neutral-600 mb-2">
-                  Tamaño de edición
-                </label>
-                <input
-                  type="number"
-                  id="edition_size"
-                  min="1"
-                  value={artworkData.edition_size}
-                  onChange={(e) => setArtworkData({ ...artworkData, edition_size: e.target.value })}
-                  className="w-full border border-black/20 px-4 py-2 text-sm outline-none focus:border-black/40 transition"
-                  placeholder="Total de copias"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="edition_number" className="block text-xs uppercase tracking-wider text-neutral-600 mb-2">
-                  Número de edición
-                </label>
-                <input
-                  type="number"
-                  id="edition_number"
-                  min="1"
-                  value={artworkData.edition_number}
-                  onChange={(e) => setArtworkData({ ...artworkData, edition_number: e.target.value })}
-                  className="w-full border border-black/20 px-4 py-2 text-sm outline-none focus:border-black/40 transition"
-                  placeholder="Esta copia"
-                />
-              </div>
-            </div>
-          </section>
-
           {/* Venta */}
           <section>
             <h3 className="text-xs uppercase tracking-wider text-neutral-600 mb-4 pb-2 border-b border-black/10">
@@ -505,7 +358,6 @@ function CreateArtwork() {
                       value={artworkData.price_cents}
                       onChange={(e) => setArtworkData({ ...artworkData, price_cents: e.target.value })}
                       className="w-full border border-black/20 px-4 py-2 text-sm outline-none focus:border-black/40 transition"
-                      placeholder="0.00"
                     />
                   </div>
 
@@ -530,56 +382,6 @@ function CreateArtwork() {
             </div>
           </section>
 
-          {/* Imágenes */}
-          <section>
-            <h3 className="text-xs uppercase tracking-wider text-neutral-600 mb-4 pb-2 border-b border-black/10">
-              Imágenes (máximo 10)
-            </h3>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block w-full border-2 border-dashed border-black/20 p-8 text-center cursor-pointer hover:border-black/40 transition">
-                  <input
-                    type="file"
-                    multiple
-                    accept="image/*"
-                    onChange={handleImageChange}
-                    className="hidden"
-                  />
-                  <span className="text-sm text-neutral-600">
-                    Click para seleccionar imágenes o arrastra aquí
-                  </span>
-                </label>
-              </div>
-
-              {previewImages.length > 0 && (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                  {previewImages.map((img, index) => (
-                    <div key={index} className="relative group">
-                      <img
-                        src={img.url}
-                        alt={img.name}
-                        className="w-full aspect-square object-cover border border-black/10"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveImage(index)}
-                        className="absolute top-2 right-2 w-6 h-6 bg-red-600 text-white text-xs rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        ✕
-                      </button>
-                      {index === 0 && (
-                        <span className="absolute bottom-2 left-2 text-xs bg-black text-white px-2 py-1 rounded">
-                          Portada
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
-
           {/* Estado */}
           <section>
             <h3 className="text-xs uppercase tracking-wider text-neutral-600 mb-4 pb-2 border-b border-black/10">
@@ -594,6 +396,9 @@ function CreateArtwork() {
               >
                 <option value="draft">Borrador (no visible)</option>
                 <option value="published">Publicada (visible para todos)</option>
+                <option value="reserved">Reservada</option>
+                <option value="sold">Vendida</option>
+                <option value="archived">Archivada</option>
               </select>
             </div>
           </section>
@@ -602,7 +407,7 @@ function CreateArtwork() {
           <div className="flex gap-4 pt-4">
             <button
               type="button"
-              onClick={() => navigate('/')}
+              onClick={() => navigate('/my-artworks')}
               className="flex-1 px-6 py-3 border border-black/20 text-sm uppercase tracking-wider hover:bg-neutral-100 transition-colors"
             >
               Cancelar
@@ -612,7 +417,7 @@ function CreateArtwork() {
               disabled={loading}
               className="flex-1 px-6 py-3 bg-black text-white text-sm uppercase tracking-wider hover:bg-neutral-800 transition-colors disabled:bg-neutral-400 disabled:cursor-not-allowed"
             >
-              {loading ? 'Creando...' : 'Crear obra'}
+              {loading ? 'Guardando...' : 'Guardar cambios'}
             </button>
           </div>
         </form>
@@ -621,4 +426,4 @@ function CreateArtwork() {
   );
 }
 
-export default CreateArtwork;
+export default EditArtwork;
