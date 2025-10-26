@@ -1,47 +1,91 @@
-// NOTA: Este componente requiere instalar la dependencia:
-// npm install @use-gesture/react
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
-// Por ahora, aquí está una versión simplificada sin dependencias externas
-// que puedes usar mientras instalas @use-gesture/react
+const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
 
-import React, { useEffect, useState, useRef } from 'react';
+function buildItems(pool, seg) {
+  const xCols = Array.from({ length: seg }, (_, i) => -37 + i * 2);
+  const evenYs = [-4, -2, 0, 2, 4];
+  const oddYs = [-3, -1, 1, 3, 5];
+
+  const coords = xCols.flatMap((x, c) => {
+    const ys = c % 2 === 0 ? evenYs : oddYs;
+    return ys.map(y => ({ x, y, sizeX: 2, sizeY: 2 }));
+  });
+
+  if (pool.length === 0) {
+    return coords.map(c => ({ ...c, src: '', alt: '' }));
+  }
+
+  const normalizedImages = pool.map(image => {
+    if (typeof image === 'string') {
+      return { src: image, alt: '' };
+    }
+    return { src: image.src || '', alt: image.alt || '' };
+  });
+
+  const usedImages = Array.from({ length: coords.length }, (_, i) => 
+    normalizedImages[i % normalizedImages.length]
+  );
+
+  return coords.map((c, i) => ({
+    ...c,
+    src: usedImages[i].src,
+    alt: usedImages[i].alt
+  }));
+}
 
 export default function DomeGallery({
   images = [],
+  fit = 20,
+  minRadius = 1000,
   overlayBlurColor = '#f4f4f2',
+  segments = 35,
   imageBorderRadius = '8px',
-  openedImageBorderRadius = '12px',
-  openedImageWidth = '600px',
-  openedImageHeight = '600px',
   grayscale = true
 }) {
-  const [selectedImage, setSelectedImage] = useState(null);
+  const rootRef = useRef(null);
+  const sphereRef = useRef(null);
   const [rotation, setRotation] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
-  const [startPos, setStartPos] = useState({ x: 0, y: 0 });
-  const containerRef = useRef(null);
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const rotationStartRef = useRef({ x: 0, y: 0 });
 
-  const handleMouseDown = (e) => {
-    setIsDragging(true);
-    setStartPos({ x: e.clientX, y: e.clientY });
-  };
-
-  const handleMouseMove = (e) => {
-    if (!isDragging) return;
-    const dx = e.clientX - startPos.x;
-    const dy = e.clientY - startPos.y;
-    setRotation(prev => ({
-      x: Math.max(-30, Math.min(30, prev.x - dy * 0.5)),
-      y: prev.y + dx * 0.5
-    }));
-    setStartPos({ x: e.clientX, y: e.clientY });
-  };
-
-  const handleMouseUp = () => {
-    setIsDragging(false);
-  };
+  const items = useMemo(() => buildItems(images, segments), [images, segments]);
 
   useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+
+    const updateRadius = () => {
+      const rect = root.getBoundingClientRect();
+      const minDim = Math.min(rect.width, rect.height);
+      let radius = minDim * fit;
+      radius = clamp(radius, minRadius, 2000);
+      root.style.setProperty('--radius', `${radius}px`);
+    };
+
+    updateRadius();
+    window.addEventListener('resize', updateRadius);
+    return () => window.removeEventListener('resize', updateRadius);
+  }, [fit, minRadius]);
+
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (!isDragging) return;
+      
+      const dx = e.clientX - dragStartRef.current.x;
+      const dy = e.clientY - dragStartRef.current.y;
+      
+      setRotation({
+        x: clamp(rotationStartRef.current.x - dy / 20, -15, 15),
+        y: rotationStartRef.current.y + dx / 20
+      });
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
     if (isDragging) {
       window.addEventListener('mousemove', handleMouseMove);
       window.addEventListener('mouseup', handleMouseUp);
@@ -50,98 +94,134 @@ export default function DomeGallery({
         window.removeEventListener('mouseup', handleMouseUp);
       };
     }
-  }, [isDragging, startPos]);
+  }, [isDragging]);
+
+  const handleMouseDown = (e) => {
+    setIsDragging(true);
+    dragStartRef.current = { x: e.clientX, y: e.clientY };
+    rotationStartRef.current = rotation;
+  };
+
+  useEffect(() => {
+    const sphere = sphereRef.current;
+    if (sphere) {
+      sphere.style.transform = `translateZ(calc(var(--radius) * -1)) rotateX(${rotation.x}deg) rotateY(${rotation.y}deg)`;
+    }
+  }, [rotation]);
+
+  const cssStyles = `
+    .sphere-root {
+      --radius: 520px;
+      --circ: calc(var(--radius) * 3.14);
+      --rot-y: calc((360deg / var(--segments-x)) / 2);
+      --rot-x: calc((360deg / var(--segments-y)) / 2);
+      --item-width: calc(var(--circ) / var(--segments-x));
+      --item-height: calc(var(--circ) / var(--segments-y));
+    }
+    .sphere, .sphere-item, .item__image { transform-style: preserve-3d; }
+    .stage {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      place-items: center;
+      perspective: calc(var(--radius) * 2);
+    }
+    .sphere {
+      transition: ${isDragging ? 'none' : 'transform 0.3s ease-out'};
+      position: absolute;
+    }
+    .sphere-item {
+      width: calc(var(--item-width) * var(--item-size-x));
+      height: calc(var(--item-height) * var(--item-size-y));
+      position: absolute;
+      top: -999px;
+      bottom: -999px;
+      left: -999px;
+      right: -999px;
+      margin: auto;
+      backface-visibility: hidden;
+      transform: rotateY(calc(var(--rot-y) * var(--offset-x))) 
+                 rotateX(calc(var(--rot-x) * var(--offset-y))) 
+                 translateZ(var(--radius));
+    }
+    .item__image {
+      position: absolute;
+      inset: 10px;
+      border-radius: ${imageBorderRadius};
+      overflow: hidden;
+      cursor: ${isDragging ? 'grabbing' : 'grab'};
+    }
+  `;
 
   return (
-    <div className="relative w-full h-full overflow-hidden" style={{ backgroundColor: overlayBlurColor }}>
-      {/* Galería simplificada */}
+    <>
+      <style dangerouslySetInnerHTML={{ __html: cssStyles }} />
       <div
-        ref={containerRef}
-        className="w-full h-full flex items-center justify-center cursor-grab active:cursor-grabbing"
-        onMouseDown={handleMouseDown}
+        ref={rootRef}
+        className="sphere-root relative w-full h-full"
         style={{
-          perspective: '1000px',
-          userSelect: 'none'
+          '--segments-x': segments,
+          '--segments-y': segments
         }}
       >
-        <div
-          className="relative"
-          style={{
-            transform: `rotateX(${rotation.x}deg) rotateY(${rotation.y}deg)`,
-            transformStyle: 'preserve-3d',
-            transition: isDragging ? 'none' : 'transform 0.3s ease-out'
-          }}
+        <div 
+          className="absolute inset-0 select-none"
+          onMouseDown={handleMouseDown}
+          style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
         >
-          <div className="grid grid-cols-3 gap-4">
-            {images.slice(0, 9).map((img, idx) => (
-              <div
-                key={idx}
-                className="relative cursor-pointer hover:scale-105 transition-transform"
-                style={{
-                  width: '200px',
-                  height: '200px',
-                  transform: `translateZ(${50 - (idx % 3) * 25}px)`,
-                  borderRadius: imageBorderRadius,
-                  overflow: 'hidden'
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSelectedImage(img);
-                }}
-              >
-                <img
-                  src={img.src}
-                  alt={img.alt}
-                  className="w-full h-full object-cover"
+          <div className="stage">
+            <div ref={sphereRef} className="sphere">
+              {items.map((it, i) => (
+                <div
+                  key={i}
+                  className="sphere-item"
                   style={{
-                    filter: grayscale ? 'grayscale(1)' : 'none'
+                    '--offset-x': it.x,
+                    '--offset-y': it.y,
+                    '--item-size-x': it.sizeX,
+                    '--item-size-y': it.sizeY
                   }}
-                  draggable={false}
-                />
-              </div>
-            ))}
+                >
+                  <div className="item__image absolute bg-gray-200">
+                    {it.src && (
+                      <img
+                        src={it.src}
+                        draggable={false}
+                        alt={it.alt}
+                        className="w-full h-full object-cover pointer-events-none"
+                        style={{ 
+                          backfaceVisibility: 'hidden',
+                          filter: grayscale ? 'grayscale(1)' : 'none' 
+                        }}
+                      />
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      </div>
-
-      {/* Modal de imagen ampliada */}
-      {selectedImage && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm"
-          onClick={() => setSelectedImage(null)}
-        >
+          
           <div
-            className="relative bg-white shadow-2xl"
+            className="absolute inset-0 pointer-events-none"
             style={{
-              width: openedImageWidth,
-              height: openedImageHeight,
-              borderRadius: openedImageBorderRadius,
-              overflow: 'hidden'
+              backgroundImage: `radial-gradient(rgba(235,235,235,0) 65%, ${overlayBlurColor} 100%)`
             }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <img
-              src={selectedImage.src}
-              alt={selectedImage.alt}
-              className="w-full h-full object-cover"
-              style={{
-                filter: grayscale ? 'grayscale(1)' : 'none'
-              }}
-            />
-            <button
-              onClick={() => setSelectedImage(null)}
-              className="absolute top-4 right-4 w-10 h-10 bg-white bg-opacity-90 rounded-full flex items-center justify-center hover:bg-opacity-100 transition-all"
-            >
-              <span className="text-xl">✕</span>
-            </button>
-          </div>
+          />
+          
+          <div
+            className="absolute left-0 right-0 top-0 h-[120px] pointer-events-none rotate-180"
+            style={{
+              background: `linear-gradient(to bottom, transparent, ${overlayBlurColor})`
+            }}
+          />
+          <div
+            className="absolute left-0 right-0 bottom-0 h-[120px] pointer-events-none"
+            style={{
+              background: `linear-gradient(to bottom, transparent, ${overlayBlurColor})`
+            }}
+          />
         </div>
-      )}
-
-      {/* Instrucciones */}
-      <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 text-xs text-neutral-500 text-center">
-        <p>Arrastra para rotar • Click para ampliar</p>
       </div>
-    </div>
+    </>
   );
 }

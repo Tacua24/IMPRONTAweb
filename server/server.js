@@ -702,6 +702,60 @@ app.delete("/favorites/artwork/:artwork_id", authenticateToken, (req, res) => {
 // ENDPOINTS PARA SOLICITUDES DE COMPRA
 // ============================================
 
+// Actualizar estado de solicitud (artista o admin)
+app.put("/purchase-requests/:id", authenticateToken, (req, res) => {
+  const id = req.params.id;
+  const { status } = req.body;
+
+  console.log('🔄 PUT /purchase-requests/:id');
+  console.log('Request ID:', id);
+  console.log('New status:', status);
+  console.log('User ID:', req.user.id);
+  console.log('User Role:', req.user.role);
+
+  // Verificar que el usuario sea el artista dueño de la obra o admin
+  const checkSql = `
+    SELECT aw.artist_id, pr.artwork_id
+    FROM purchase_requests pr
+    JOIN artworks aw ON pr.artwork_id = aw.id
+    WHERE pr.id = ?
+  `;
+  
+  db.query(checkSql, [id], (err, results) => {
+    if (err) {
+      console.error('❌ Error en query de verificación:', err);
+      return res.status(500).json({ message: "Error del servidor: " + err.message });
+    }
+    
+    if (results.length === 0) {
+      console.log('❌ Solicitud no encontrada');
+      return res.status(404).json({ message: "Solicitud no encontrada" });
+    }
+    
+    console.log('✅ Solicitud encontrada:', results[0]);
+    console.log('Artist ID de la obra:', results[0].artist_id);
+    
+    if (results[0].artist_id !== req.user.id && req.user.role !== 'admin') {
+      console.log('❌ Sin permisos');
+      return res.status(403).json({ message: "No tienes permiso para actualizar esta solicitud" });
+    }
+
+    console.log('✅ Permisos OK, actualizando...');
+    const sql = "UPDATE purchase_requests SET status = ? WHERE id = ?";
+    
+    db.query(sql, [status, id], (err, result) => {
+      if (err) {
+        console.error('❌ Error actualizando:', err);
+        return res.status(500).json({ message: "Error al actualizar: " + err.message });
+      }
+      
+      console.log('✅ Solicitud actualizada exitosamente');
+      console.log('Rows affected:', result.affectedRows);
+      return res.json({ success: "Solicitud actualizada exitosamente" });
+    });
+  });
+});
+
 // Crear solicitud de compra
 app.post("/purchase-requests", async (req, res) => {
   try {
